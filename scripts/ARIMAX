@@ -1,0 +1,533 @@
+proc import datafile='/opt/sas/home/sstsasuser.viya/Time series final project/fp_train.csv'
+out=train
+dbms=csv
+replace;
+
+data train;
+set train;
+month=month(date);
+if date >= '26mar2020'd then covid=1;
+else covid=0;
+;
+
+/*print data to check import step*/
+proc print data=train(obs=100);
+
+%let response=dm8_o3 dm1_so2	dm1_no2	dm8_co	PRCP	SNWD	TMAX	WSF2	WSF5	SNOW	AWND	TAVG	TMIN;
+
+proc contents
+     data = train
+          noprint
+          out = data_info
+               (keep = name varnum);
+run;
+
+
+* sort "data_info" by "varnum";
+* export the sorted data set with the name "variable_names", and keep just the "name" column;
+proc sort
+     data = data_info
+          out = variable_names(keep = name);
+     by varnum;
+run;
+
+
+* view the list of variables;
+proc print
+     data = variable_names
+          noobs;
+run;
+
+/* put all values into macro variable named val*/
+proc sql noprint;                              
+ select name into :val1- 
+ from variable_names
+where name not in ('STATION','NAME','DATE');
+quit;
+/*%put ParamList = &ParamList;   /* display list in SAS log */
+
+
+
+/*create macro to call the variables*/
+options mprint mlogic;
+%macro print;
+%do i=1 %to &sqlobs;
+	/*ods pdf file = 'c:\year_&i.pdf'*/
+	proc sgplot data=train;
+	series x=date y=&&val&i;
+		title &&val&i;
+	
+	/*ods pdf close;*/
+%end;
+%mend %print;
+
+/*visualize variables*/
+%print;
+
+
+
+
+%let inputs= 
+/* dm8_o3 */
+dm1_so2
+dm1_no2
+/* dm8_co */
+PRCP
+/* SNWD */
+/* TMAX */
+WSF2
+/* WSF5 */
+/* SNOW */
+/*  AWND */
+TAVG
+/* TMIN */
+
+;
+
+proc reg data=train;
+model dm8_o3= &inputs;
+output out=residreg r=resid;
+run;
+
+/* proc sgplot data=residreg; */
+/* series x=date y=resid; */
+
+proc arima data=residreg plots=all;
+identify var=resid crosscorr=(&inputs) stationarity=(adf=2);
+estimate input=(&inputs) method=ML;
+run;
+quit;
+
+/**xs do not seam to address seasonaility**/
+
+
+
+/*fit seasonality using trig functions */
+data train_trig;
+	set train;
+	pi=constant("pi");
+	s1=sin(2*pi*1*_n_/365);
+	c1=cos(2*pi*1*_n_/365);
+	s2=sin(2*pi*2*_n_/365);
+	c2=cos(2*pi*2*_n_/365);
+	s3=sin(2*pi*3*_n_/365);
+	c3=cos(2*pi*3*_n_/365);
+	s4=sin(2*pi*4*_n_/365);
+	c4=cos(2*pi*4*_n_/365);
+	s5=sin(2*pi*5*_n_/365);
+	c5=cos(2*pi*5*_n_/365);
+	s6=sin(2*pi*6*_n_/365);
+	c6=cos(2*pi*6*_n_/365);
+	s7=sin(2*pi*7*_n_/365);
+	c7=cos(2*pi*7*_n_/365);
+
+
+
+
+
+* Fit an ARIMA model using this sine & cosine data; 
+proc arima data=train_trig plots(unpack)=all ;
+	identify var=dm8_o3 crosscorr=(s1 c1 s2 c2 s3 c3 s4 c4 s5 c5 c6 s6 s7 c7);
+	estimate input=(s1 c1 s2 c2 s3 c3 s4 c4 s5 c5 s6 c6 s7 c7) method=ML;
+	forecast out=dummy_out lead=0;
+
+/* data residreg; */
+/* set residreg; */
+/* month=month(date); */
+/* if date >= '26mar2020'd then covid=1; */
+/* else covid=0; */
+/* ; */
+
+/*fit seasonality using dummy variables*/
+/* data train_dummy; */
+/* 	set train; */
+/* 	if month=1 then seas1=1; else seas1=0; */
+/* 	if month=2 then seas2=1; else seas2=0; */
+/* 	if month=3 then seas3=1; else seas3=0; */
+/* 	if month=4 then seas4=1; else seas4=0; */
+/* 	if month=5 then seas5=1; else seas5=0; */
+/* 	if month=6 then seas6=1; else seas6=0; */
+/* 	if month=7 then seas7=1; else seas7=0; */
+/* 	if month=8 then seas8=1; else seas8=0; */
+/* 	if month=9 then seas9=1; else seas9=0; */
+/* 	if month=10 then seas10=1; else seas10=0; */
+/* 	if month=11 then seas11=1; else seas11=0; */
+/* run; */
+
+* Fit an ARIMA model and obtain a forecast; 
+/* proc arima data=train_dummy plots(unpacked)=all; */
+/* 	identify var=dm8_o3 crosscorr=(seas1 seas2 seas3 seas4 seas5 seas6 seas7 seas8 seas9 seas10 seas11); */
+/* 	estimate  input=(seas1 seas2 seas3 seas4 seas5 seas6 seas7 seas8 seas9 seas10 seas11); */
+/* 	forecast out=dummy lead=0; */
+
+
+/*compare trig and dummy variables*/
+data all_seas ;
+merge dummy_out(rename=forecast=dummy) trig (rename=forecast=trig) dm8_03 (keep=date);
+
+proc sgplot data =all_seas;
+series x=date y=dm8_03;
+ series x=date y=dummy;
+series x=date y=trig;
+
+
+
+/*continue to address seasonality seen in data using differences*/
+proc arima data=train plots(unpack)=all;
+identify var=dm8_o3(365) stationarity=(adf=2);
+/* estimate input=(&inputs)  method=ML; */
+run;
+
+
+
+
+
+
+/**************************TRAINING TESTING*******************************************************************************************************/
+
+
+/*Candidate one and two test with and without covoid intervention variable*/
+%let inputs= 
+/* dm8_o3 */
+dm1_so2
+dm1_no2
+/* dm8_co */
+PRCP
+/* SNWD */
+/* TMAX */
+WSF2
+/* WSF5 */
+/* SNOW */
+/*  AWND */
+TAVG
+/* TMIN */
+/* covid */
+;
+
+
+
+proc reg data=train;
+model dm8_o3= &inputs;
+output out=residreg r=resid;
+run;
+
+
+/* candidate one*/
+proc arima data=residreg plots(unpack)=all;;
+identify var=resid stationarity=(adf=2);
+***** stationary;
+
+proc arima data=train plots(unpack)=all;;
+identify var=dm8_o3(365) crosscorr=(&inputs) ;
+estimate input=(&inputs) q=(1,2,3,4,5,12) p=(7,8,11,24) method=ML;
+
+forecast out=cand1_out lead=0;
+
+/* candidate two*/
+proc arima data=train plots(unpack)=all;;
+identify var=dm8_o3(365) crosscorr=(&inputs) ;
+estimate input=(&inputs) q=(1,2,3,4,5) p=(7,8,11,24) method=ML;
+forecast out=cand2_out lead=0;
+
+run;
+
+
+
+
+/*MAPE of the Training Data candidate 1*/
+Data mapemae;
+Set cand1_out;
+Abs_error=abs(residual);
+Abs_err_obs=abs_error/abs(dm8_o3);
+Run;
+Proc means data=mapemae mean;
+Var abs_error abs_err_obs;
+Run;
+
+
+
+/*MAPE of the Training Data candidate 2*/
+Data mapemae;
+Set cand2_out;
+Abs_error=abs(residual);
+Abs_err_obs=abs_error/abs(dm8_o3);
+Run;
+Proc means data=mapemae mean;
+Var abs_error abs_err_obs;
+Run;
+
+
+
+/*********************************Forecast x's************************************************************************************************************************/
+
+/*  */
+/* candidate one */
+/* proc arima data=residreg plots(unpack)=all;; */
+/* identify var=resid(365) crosscorr=(dm1_so2) ; */
+/* estimate input=(&inputs) q=(1,2,3,4,5,12) p=(7,8,11,24) method=ML; */
+/*  */
+/* forecast out=cand1_out lead=0; */
+/*  */
+/* candidate one */
+/* proc arima data=residreg plots(unpack)=all;; */
+/* identify var=resid(365) crosscorr=(dm1_no2) ; */
+/* estimate input=(&inputs) q=(1,2,3,4,5,12) p=(7,8,11,24) method=ML; */
+/*  */
+/* forecast out=cand1_out lead=0; */
+
+
+
+
+
+
+
+/* candidate three tested with and without covid intervention*/
+
+%let inputs= 
+/* dm8_o3 */
+/* dm1_so2 */
+dm1_no2
+/* dm8_co */
+/* PRCP */
+/* SNWD */
+/* TMAX */
+WSF2
+/* WSF5 */
+/* SNOW */
+/*  AWND */
+TAVG
+/* TMIN */
+/* covid */
+;
+
+
+proc reg data=train;
+model dm8_o3= &inputs;
+output out=residreg r=resid;
+run;
+
+/* candidate three*/
+proc arima data=residreg plots(unpack)=all;
+identify var=resid stationarity=(adf=2);
+run;
+************ stationary;
+proc arima data=train plots(unpack)=all;;
+identify var=dm8_o3(365) crosscorr=(&inputs) ;
+estimate input=(&inputs) q=(1,2,3,4,5) p=(7,8,11,24) method=ML;
+forecast out=cand3_out lead=0;
+run;
+
+
+/*MAPE of the Training Data candidate 3*/
+Data mapemae;
+Set cand3_out;
+Abs_error=abs(residual);
+Abs_err_obs=abs_error/abs(dm8_o3);
+Run;
+Proc means data=mapemae mean;
+Var abs_error abs_err_obs;
+Run;
+
+
+
+/*merging  train and valid datasets*/
+
+/* proc import datafile='/opt/sas/home/msenay/sasuser.viya/TS/final_project/fp_valid.csv' */
+/* out=valid */
+/* dbms=csv */
+/* replace; */
+/*  */
+/*  */
+/* proc sort data=train; */
+/* by date; */
+/*  */
+/* proc sort data=valid; */
+/* by date; */
+/*  */
+/*  */
+/* data train_valid_merge; */
+/* set train valid; */
+/*  */
+/* proc contents data=train; */
+/* proc contents data=train_valid_merge; */
+/*  */
+
+
+/**************************VALIDATION TESTING*******************************************************************************************************/
+****** use data set with forecasted xs for the validation observations;
+
+proc reg data=ts.fp_t_and_v_forecasted_x;
+model dm8_o3= &inputs;
+output out=residreg r=resid p=Ypredicted;
+run;
+proc arima data=residreg plots(unpack)=all;
+identify var=resid(365) stationarity=(adf=2) ;
+run;
+
+/* candidate one*/
+proc arima data=ts.fp_t_and_v_forecasted_x plots(unpack)=all;
+identify var=dm8_o3(365) crosscorr=(&inputs) ;
+estimate input=(&inputs) q=(1,2,3,4,5,12) p=(7,8,11,24) method=ML;
+forecast id=date out=cand1_valid_out back=28  lead=28;
+/* output forecasted ozone values in format for the ensemble model */
+data ensemble_arimax_cand1 (keep= n dm8_o3_f_arimax);
+set cand1_valid_out;
+where date>'19APR2020'd;
+n+1;
+rename forecast=dm8_o3_f_arimax;
+run;
+
+
+/* flag validation data*/
+data cand1_valid_out;
+set cand1_valid_out;
+if date > '19apr2020'd then valid=1;
+else valid=0;
+;
+
+
+/* candidate two*/
+proc arima data=ts.fp_t_and_v_forecasted_x plots(unpack)=all;;
+identify var=dm8_o3(365) crosscorr=(&inputs) ;
+estimate input=(&inputs) q=(1,2,3,4,5) p=(7,8,11,24) method=ML;
+forecast id=date out=cand2_valid_out back=28 lead=28;
+run;
+data ensemble_arimax_cand2 (keep= n dm8_o3_f_arimax);
+set cand2_valid_out;
+where date>'19APR2020'd;
+n+1;
+rename forecast=dm8_o3_f_arimax;
+run;
+/* flag validation data*/
+data cand2_valid_out;
+set cand2_valid_out;
+if date > '19apr2020'd then valid=1;
+else valid=0;
+run;
+
+
+
+/*MAPE of the validation Data model 1*/
+Data mapemae1_valid;
+Set cand1_valid_out;
+Abs_error=abs(residual);
+Abs_err_obs=abs_error/abs(dm8_o3);
+where valid=1;
+Run;
+Proc means data=mapemae1_valid mean;
+Var abs_error abs_err_obs;
+Run;
+
+
+/*MAPE of the validation Data model 2*/
+Data mapemae2_valid;
+Set cand2_valid_out;
+Abs_error=abs(residual);
+Abs_err_obs=abs_error/abs(dm8_o3);
+where valid=1;
+Run;
+Proc means data=mapemae2_valid mean;
+Var abs_error abs_err_obs;
+Run;
+
+
+
+
+/* candidate three input run with and without covid intervention variables */
+
+%let inputs= 
+/* dm8_o3 */
+/* dm1_so2 */
+dm1_no2
+/* dm8_co */
+/* PRCP */
+/* SNWD */
+/* TMAX */
+WSF2
+/* WSF5 */
+/* SNOW */
+/*  AWND */
+TAVG
+/* TMIN */
+;
+
+
+proc reg data=ts.fp_t_and_v_forecasted_x;
+model dm8_o3= &inputs;
+output out=residreg r=resid p=Ypredicted;
+run;
+proc arima data=residreg plots=all;
+identify var=resid(365) stationarity=(adf=3);
+run;
+
+/* candidate three arima */
+proc arima data=ts.fp_t_and_v_forecasted_x plots(unpack)=all;
+identify var=dm8_o3(365) crosscorr=(&inputs) ;
+estimate input=(&inputs) q=(1,2,3,4,5) p=(7,8,11,24) method=ML;
+forecast id=date out=cand3_valid_out lead=28 back=28;
+run;
+data ensemble_arimax_cand3 (keep= n dm8_o3_f_arimax);
+set cand3_valid_out;
+where date>'19APR2020'd;
+n+1;
+rename forecast=dm8_o3_f_arimax;
+run;
+
+
+/*MAPE of the valid Data model 3*/
+Data mapemae3_valid;
+Set cand3_valid_out;
+Abs_error=abs(residual);
+Abs_err_obs=abs_error/abs(dm8_o3);
+Run;
+Proc means data=mapemae3_valid mean;
+Var abs_error abs_err_obs;
+Run;
+
+
+
+
+*************************************************************                    TEST PHASE                              ********************;
+/*candidate 1/2 inputs*/
+%let inputs= 
+/* dm8_o3 */
+dm1_so2
+dm1_no2
+/* dm8_co */
+PRCP
+/* SNWD */
+/* TMAX */
+WSF2
+/* WSF5 */
+/* SNOW */
+/*  AWND */
+TAVG
+/* TMIN */
+
+;
+************ use file with forecasted xs for the test data;
+
+proc reg data=ts.fp_t_v_and_t_forecasted_x;
+model dm8_o3= &inputs;
+output out=residreg r=resid p=Ypredicted;
+run;
+
+proc arima data=residreg plots(unpack)=all;;
+identify var=resid(365) stationarity=(adf=2) ;
+run;
+
+proc arima data=ts.fp_t_v_and_t_forecasted_x plots(unpack)=all;;
+identify var=dm8_o3(365) crosscorr=(&inputs) ;
+estimate input=(&inputs) q=(1,2,3,4,5,12) p=(7,8,11,24) method=ML;
+forecast out=cand1_test_out back=14 lead=14;
+
+/*MAPE of the test Data model 3*/
+Data mapemae3_test;
+Set cand3_test_out;
+Abs_error=abs(residual);
+Abs_err_obs=abs_error/abs(resid);
+Run;
+Proc means data=mapemae3_valid mean;
+Var abs_error abs_err_obs;
+Run;
+
