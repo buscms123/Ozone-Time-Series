@@ -1,0 +1,202 @@
+proc import datafile="/opt/sas/home/ss/sasuser.viya/Time series final project/fp_test.csv" dbms=csv out=ts.fp_test;
+proc import datafile="/opt/sas/home/ss/sasuser.viya/Time series final project/fp_train.csv" dbms=csv out=ts.fp_train;
+proc import datafile="/opt/sas/home/ss/sasuser.viya/Time series final project/fp_valid.csv" dbms=csv out=ts.fp_valid;
+/* Visualize just two years */
+data short;
+set ts.fp_train;
+if date<'01JAN2016'd;
+run;
+proc sgplot data=short;
+    series x=date y=dm8_o3;
+run;
+quit;
+/* visualize all training*/
+proc sgplot data=ts.fp_train;
+    series x=date y=dm8_o3;
+run;
+quit;
+proc arima data=ts.fp_train plot=all;
+	identify var=dm8_o3;
+run;
+quit;
+
+
+data dummy;
+set ts.fp_train;
+month=month(date);
+	if month=1 then seas1=1; else seas1=0;
+	if month=2 then seas2=1; else seas2=0;
+	if month=3 then seas3=1; else seas3=0;
+	if month=4 then seas4=1; else seas4=0;
+	if month=5 then seas5=1; else seas5=0;
+	if month=6 then seas6=1; else seas6=0;
+	if month=7 then seas7=1; else seas7=0;
+	if month=8 then seas8=1; else seas8=0;
+	if month=9 then seas9=1; else seas9=0;
+	if month=10 then seas10=1; else seas10=0;
+if month=11 then seas11=1; else seas11=0;
+run;
+
+
+
+/* am I doing something wrong? because this looks pretty good tbh */
+/* proc arima data=dummy plot=all; */
+/* 	identify var=dm8_o3 stationarity=(adf=2 dlag=12) crosscorr=(seas1 seas2 seas3 seas4 seas5 seas6 seas7 seas8 seas9 seas10 seas11); */
+/* 	estimate p=1 q=1 input=(seas1 seas2 seas3 seas4 seas5 seas6 seas7 seas8 seas9 seas10 seas11); */
+/* 	forecast lead=0; */
+/* run; */
+/* quit; */
+/*  */
+/* proc arima data=dummy plot=all; */
+/* 	identify var=dm8_o3 stationarity=(adf=2 dlag=12) crosscorr=(seas1 seas2 seas3 seas4 seas5 seas6 seas7 seas8 seas9 seas10 seas11); */
+/* 	estimate input=(seas1 seas2 seas3 seas4 seas5 seas6 seas7 seas8 seas9 seas10 seas11) method=ML; */
+/* 	forecast out=dummy2 lead=0; */
+/* run; */
+/* quit; */
+/* proc arima data=dummy2 plots=all; */
+/* identify var=residual stationarity=(adf=2); */
+/* run; */
+/* quit; */
+/*  */
+/* proc arima data=dummy plot=all; */
+/* 	identify var=dm8_o3 stationarity=(adf=2 dlag=12) crosscorr=(seas1 seas2 seas3 seas4 seas5 seas6 seas7 seas8 seas9 seas10 seas11); */
+/* 	estimate p=1 q=1 input=(seas1 seas2 seas3 seas4 seas5 seas6 seas7 seas8 seas9 seas10 seas11) method=ml; */
+/* run; */
+/* quit; */
+
+
+/* Let's try trig */
+data trig;
+set ts.fp_train;
+pi=constant("pi");
+s1=sin(2*pi*1*_n_/365);
+c1=cos(2*pi*1*_n_/365);
+s2=sin(2*pi*2*_n_/365);
+c2=cos(2*pi*2*_n_/365);
+s3=sin(2*pi*3*_n_/365);
+c3=cos(2*pi*3*_n_/365);
+s4=sin(2*pi*4*_n_/365);
+c4=cos(2*pi*4*_n_/365);
+s5=sin(2*pi*5*_n_/365);
+c5=cos(2*pi*5*_n_/365);
+s6=sin(2*pi*6*_n_/365);
+c6=cos(2*pi*6*_n_/365);
+run;
+
+proc arima data=trig plots=all;
+identify var=dm8_o3 crosscorr=(s1 c1 s2 c2 s3 c3 s4 c4 s5 c5 s6 c6 );
+estimate input=(s1 c1 s2 c2 s3 c3 s4 c4 s5 c5 s6 c6 ) method=ML;
+forecast out=trig2 lead=0;
+run; quit;
+
+/* this seems pretty good */
+proc arima data=trig plots=all;
+identify var=dm8_o3(365) crosscorr=(s1 c1 s2 c2 s3 c3 s4 c4 s5 c5 s6 c6 );
+estimate input=(s1 c1 s2 c2 s3 c3 s4 c4 s5 c5 s6 c6 ) method=ML;
+forecast out=trig2 lead=0;
+run; quit;
+
+/* plot actual vs predicted with the trig functions */
+data all_train;
+merge trig2 (rename=forecast=trig) ts.fp_train (keep=date);
+run;
+
+proc sgplot data=all_train;
+series x=date y=dm8_o3;
+series x=date y=trig;
+title "Actual versus Predicted Values";
+run;
+
+/* Check stationarity */
+proc arima data=trig2 plots(unpack)=all;
+identify var=residual stationarity=(adf=2);
+run;
+quit;
+/* residuals are stationary, relatively normal with constant variance*/
+/* Model identification with minimum information criterion (MINIC);  */
+
+proc arima data=trig plots=all;
+identify var=dm8_o3(365) minic P=(0:10) Q=(0:10) ;
+run; quit;
+
+proc arima data=trig plots=all;
+identify var=dm8_o3(365) scan P=(0:10) Q=(0:10) ;
+run; quit;
+
+/* fit AR and MA terms */
+
+
+/* proc arima data=trig plots=all; */
+/* identify var=dm8_o3(365) ; */
+/* estimate p=1 q=1  method=ML; */
+/* forecast out=trig3 lead=0; */
+/* run; quit; */
+
+/* proc arima data=trig plots=all; */
+/* identify var=dm8_o3(365) ; */
+/* estimate p=2 q=2  method=ML; */
+/* forecast out=trig3 lead=0; */
+/* run; quit; */
+/* proc arima data=trig plots=all; */
+/* identify var=dm8_o3(365) ; */
+/* estimate p=1 q=6  method=ML; */
+/* forecast out=trig3 lead=0; */
+/* run; quit; */
+
+
+proc arima data=trig plots=all;
+identify nlag=50 var=dm8_o3(365) ;
+estimate p=7 q=1  method=ML;
+forecast out=trig3 lead=0;
+run; quit;
+/* White noise looks the best for the above ARIMA */
+
+/* calculate mape and mae for training functions */
+Data mapemae;
+Set trig3;
+Abs_error=abs(residual);
+Abs_err_obs=abs_error/abs(dm8_o3);
+Run;
+
+Proc means data=mapemae mean;
+Var abs_error abs_err_obs;
+Run;
+
+/* try it with validation */
+data train_valid;
+merge  trig ts.fp_valid;
+run;
+proc sort data=train_valid;
+by date;
+run;
+proc arima data=train_valid plots=all;
+identify var=dm8_o3(365) crosscorr=(s1 c1 s2 c2 s3 c3 s4 c4 s5 c5 s6 c6 );
+estimate p=7 q=1 input=(s1 c1 s2 c2 s3 c3 s4 c4 s5 c5 s6 c6 ) method=ML;
+forecast id=date out=valid_fore back=28 lead=28;
+run; quit;
+
+
+/* Calculate MAPE and MAE  */
+/* Append Forecasted data */
+data valid_fore;
+	set valid_fore;
+	if Date<'20APR2020'd then do;
+		part='train';
+		output;
+	end;
+	else if Date>'19APR2020'd then do;
+		part='valid';
+		output;
+	end;
+run;
+
+/* Check MAPE and MAE */
+proc sql;
+	create table validmape as
+	select part, AVG(abs(dm8_o3-forecast)) as MAE, AVG(abs(dm8_o3-forecast)/dm8_o3) as MAPE
+	from valid_fore
+	group by part;
+run;
+
+proc print data=validmape;
+run;
