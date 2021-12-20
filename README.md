@@ -29,5 +29,3 @@ Potential gains
 Potential challenges or drawbacks
 Make a recommendation for which model the client should use
 Provide graphics of the best model(s) forecast for test data overlaid with observed/actual values for test data
-Provide predictions for June1, 2020-June 14, 2020 on the form https://docs.google.com/forms/d/e/1FAIpQLScVY9DTvRanulQC-y_mcSpPlkiu2Lw7tw8gb0J778q6ttc-qQ/viewform?vc=0&c=0&w=1
-
